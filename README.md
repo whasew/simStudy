@@ -9,11 +9,11 @@ Design and Simulation of an gene expression experiment
 # Design
 
 ## 5 cases
-case | differentiated  | drug concentration 
-------------- | ------------- 
-1 | - | 0 
-2  | + | 0 
-3 | + | 2.5 
-4 | + | 5 
-5 | + | 7 
+ case | differentiated  | drug concentration  
+ ------------- | ------------- | -------------  
+ 1 | - | 0  
+ 2  | + | 0  
+ 3 | + | 2.5  
+ 4 | + | 5  
+ 5 | + | 7  
 
