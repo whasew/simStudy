@@ -17,66 +17,157 @@ Design and Simulation of an gene expression experiment
  4 | + | 5  
  5 | + | 7  
 
+
+\[R=R_{min}+(R_{max}-R_{min})*P_{logis} \]
+\[R_{max}=F_{fold}\times R_{min}\]
+\[R=R_{min}(1+(F_{fold}-1))*P_{logis}(hill*log(conc/EC_{50})) \]
+
+## Seed
+R generates pseudo rondom numbers. You can get identical sets of random numbers with set.seed(1234). With varying seed you will get different results for each simulaton step.
+
+## Confidence intervals
+Confidence intervals should include the start parameter set!
+
+```{r start}
+project<-"design"
+setwd(paste("~/Arbeitsfläche/simStudy",project,sep="/"))
+```
+
 5 genes and duplicate measurement of each sample ID
 
-```{r packages}
+```{r packages,message=FALSE}
+library("ProjectTemplate")
+load.project()
+opts_chunk$set(cache=FALSE,dev = c('png','pdf'),echo=FALSE, message=FALSE, fig.width=11,fig.height=8,warning=FALSE,results='hide')
 library(MASS)
 library(nlme)
-source("../src/myFun.R")
-source("../src/helpers.R")
+source("src/myFun.R")
+source("src/helpers.R")
 ```
 
 ```{r parameter}
-mv<-c(HPRT=1000,ABCD1=900,ABCD2=10,ABCD3=700)
-conc<-c(0,0,2.5,5,7)
-diff<-c(0,rep(1,length(conc)-1))
-hill=20
-fold<-c(HPRT=1.3,ABCD1=1.3,ABCD2=5,ABCD3=5)
-ec50<-c(HPRT=10,ABCD1=7,ABCD2=5,ABCD3=7)
-eps<-2E-1
-Sigma<-diag(rep(.1^2,length(mv)))
 selGene<-c("HPRT",paste("ABCD",1:3,sep=""))
-myF<-function(id,n) paste(id,n,sep="")
-yy<-function(x,ymin,fa,ec50) ymin*(1+(fa-1)*plogis(hill*log(x/ec50)))
+mv<-c(HPRT=1000,ABCD1=1000,ABCD2=10,ABCD3=1000)
+conc<-c(0,0.1,2.5,5,7)
+diff<-c(FALSE,rep(TRUE,length(conc)-1))
+diff<-c("D","O",rep("D",length(conc)-2))
+hill=20
+fold<-c(HPRT=1.,ABCD1=1.3,ABCD2=5,ABCD3=1/3)
+ec50<-c(HPRT=10,ABCD1=5,ABCD2=5,ABCD3=5)
+eps<-.1^2
+omega<-.2^2
+Sigma<-diag(rep(omega,length(mv)))
+
+```
+
+
+# Conc response function
+
+- between sample variability \( \omega \) = `r signif(sqrt(omega),3)`
+- within sample or residual variability \( \sigma \) = `r signif(sqrt(eps),3)`
+
+parameter | HPRT | ABCD1 | ABCD2 | ABCD3
+ -------- | ----- |----- | ----- | -----
+$R_{min}$ | 1000  | 1000 | 10 | 1000
+$F_{fold}$ | 1  | 1 | 5 | .7
+$EC_{50}$ | 1  | 1 | 5 | 5
+
+
+```{r makeData}
 nRep<-3
-nId<-length(conc)*nRep
-dd<-expand.grid(Case=seq(along=conc),Rep=1:nRep,Obs=1:2,Gene=selGene)
-dd$FCase<- 
-  factor(myF("C", dd$Case),levels=myF("C", seq(along=conc)))
-dd$ID<-paste("S",dd$Case,dd$Rep,sep="")
+nObs<-2
+dd<-expand.grid(Case=seq(along=conc), Rep=1:nRep,Obs=1:nObs)
+dd
 
-dd<-transform(dd,ID=factor(ID,level=paste("S",rep(seq(along=conc),each=nRep),rep(1:nRep,length(conc)),sep="")),Conc=conc[Case],mRNA=yy(conc[Case],mv[Gene],fold[Gene],ec50[Gene]))
+dd<-transform(dd,ID=factor(paste("S", Case,Rep,sep=""),ordered=T),Conc=conc[Case],FCase=LETTERS[Case])
+xtabs(~ID,dd)
+dd<-dd[order(dd$ID,dd$Rep,dd$Obs),]
+dd
+yy<-function(x,fa,ec50) (1+(fa-1)*plogis(hill*log(x/ec50)))
+sgene<-selGene[3]
+xyplot(yy(0:9,fold[sgene],ec50[sgene])~0:9,scale=list(x=xyLogscale()),type="b")
 
-rand<-with(dd,exp(mvrnorm(length(levels(ID)),rep(0,length(mv)),Sigma=Sigma)[ID])*mRNA)
-dd$RNA<-rand
-dd$obs<-exp(rnorm(nrow(dd),sd=eps))*rand 
+#yy(0:9,fold[sgene],ec50[sgene])
+```
+
+
+
+```{r makeRandomVector}
+#set.seed(1234);
 head(dd)
+xtabs(~ID,dd)
+rand<-with(dd,mvrnorm(length(levels(ID)),rep(0,length(mv)),Sigma=Sigma)[ID,])
+dimnames(rand)<-list(dd$ID,names(mv))
+mvm<-matrix(mv,ncol=length(mv),nrow=nrow(dd),byrow=T,dimnames=dimnames(rand) )
+ddr<-cbind(dd,mvm*exp(rand))
+ddrm<-myMelt(ddr,selGene,varn="Gene",valn="RNA")
 
+```
+
+
+```{r teil2,results='markup'}
+names(ddrm)[names(ddrm)%in%c("variable","value")]<-c("Gene","RNA")
+ddrm<-transform(ddrm, RNAobs=RNA*yy(Conc,fold[Gene],ec50[Gene]))
+ddrm$RNAobs<-ddrm$RNAobs*exp(rnorm(nrow(ddrm),0,eps))         
+head(ddrm)
 ```
 
 ```{r gd}
-gd<-groupedData(obs~Conc|ID,dd)
-plot(gd,scale=list(y=xyLogscale()),aspect="fill",outer=~Gene)
-plot(gd,outer=~Gene,aspect="fill",scale=list(y=c(xyLogscale(c(1,5E4)),list(relation="free"))))
+gd<-groupedData(RNAobs~Conc|Rep,ddrm)
+sapply(gd,class)
+plot(gd,scale=list(y=xyLogscale()),aspect="fill",outer=~Gene,key=T)
+plot(gd,outer=~Gene,aspect="fill",scale=list(y=c(xyLogscale(c(1,5E4)),list(relation="free"))),key=T)
 
 ```
+
+
 
 ```{r gdF}
-gd<-groupedData(obs~FCase|ID/Obs,dd)
-plot(gd,displayLevel=1,collapseLevel=1,,scale=list(x=xyLogscale(c(1,1E4))),aspect="fill",inner=~Gene)
+gd<-groupedData(RNAobs~Gene|ID,ddrm)
+pp<-
+  plot(gd,displayLevel=1,collapseLevel=1,,scale=list(x=xyLogscale(c(1,1E4))),aspect="fill",inner=~Gene,mv=mv)
+pp$panel<-function (x, y, subscripts, groups,mv) 
+{
+    dot.line <- trellis.par.get("dot.line")
+    panel.abline(h = y, v=log10(mv) ,lwd = dot.line$lwd, lty = dot.line$lty, 
+        col = dot.line$col)
+    panel.superpose(x, y, subscripts, groups)
+}
+pp
 
 ```
-
 
 # lme
 
 ```{r fit1}
-fms1<-lme(log10(obs)~Gene*FCase,gd,random=~1|ID)
-anova(fms1)
-summary(fms1)$tT
-gdInt<-intervals(fms1,levels=.68)
+sapply(gd,class)
+head(gd)
+gd$lobs<-log10(gd$RNAobs)
+levels(gd$Gene)
+levels(gd$FCase)
+fms1<-lme(lobs~Gene*FCase,gd,random=~1|ID)
+fms2<-update(fms1,random=~(Gene-1)|ID)
+fms3<-update(fms1,random=list(ID=pdDiag(~(Gene-1))))
+anova(fms3,fms2,fms1)
+anova(fms3,fms2)
+fmsfin<-fms3
+anova(fmsfin)
+summary(fmsfin)$tT
+gdInt<-intervals(fmsfin,levels=.68)
 
 ```
+
+
+```{r compare,results='markup'}
+#gdInt$fix
+10^gdInt$fix#[1:4,]
+mv
+gdInt$reStruct
+gdInt$sigma
+c(omega=sqrt(omega),eps=sqrt(eps))
+```
+
+
 
 # barplot
 
@@ -106,12 +197,28 @@ LOG=F
 if(!LOG) {ym <-10^ym;yup <- 10^yup;ylow <- 10^ylow}
 #LAS=2;lay=NULL;ylim=NULL;col=0
 #barx <- barplot(ym,beside=T,col=col,las=LAS,ylim=ylim,ylab=ylab,legend.text=T,args.legend = list(x = leg,ncol=2,bty = "n"),layout=lay)
-
-barx <- barplot(ym,beside=T,col=2:4,las=1,legend.text=T,args.legend = list(x = "topleft",ncol=2,bty = "n"))
+ylim<-c(0,max(yup)*1.1)
+col=rainbow(length(levels(gd$Gene))-1)
+barx <- barplot(ym,beside=T,col=col,las=1,legend.text=T,args.legend = list(x = "topleft",ncol=1,bty = "n"),ylim=ylim)
 abline(h=1)
 error.bar(barx,ym,yup-ym,ym-ylow)
 
 ```
 
+```{r transpose}
+ym<-t(ym);yup <- t(yup);ylow <- t(ylow)
+col=rainbow(length(levels(dd$FCase))-1)
+barx <- barplot(ym,beside=T,col=col,las=1,legend.text=T,args.legend = list(x = "topleft",ncol=1,bty = "n"),ylim=ylim)
+abline(h=1)
+error.bar(barx,ym,yup-ym,ym-ylow)
+```
+
+
+# Results
+
+- no influence of cell differentiation is assumed
+- lme results represents input parameter
+- experimental design sufficient to show strong induction of gene expression
+- repeating simulations with different assumption may result in the sensitivity of the design.
 
 
