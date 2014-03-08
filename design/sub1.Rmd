@@ -30,7 +30,9 @@ Confidence intervals should include the start parameter set!
 
 ```{r start}
 project<-"design"
-setwd(paste("~/Arbeitsfläche/simStudy",project,sep="/"))
+myhome<-"~/Arbeitsfläche"
+setwd(paste(myhome,"simStudy",project,sep="/"))
+getwd()
 ```
 
 5 genes and duplicate measurement of each sample ID

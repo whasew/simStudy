@@ -3,6 +3,6 @@ cache_loading: off
 munging: off
 logging: off
 load_libraries: on
-libraries: knitr, reshape2
+libraries: knitr, reshape2,MASS, nlme,xtable,plyr
 as_factors: on
 data_tables: off
