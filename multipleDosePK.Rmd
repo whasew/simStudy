@@ -10,40 +10,53 @@ output: ioslides_presentation
 in 70 kg adults:
 - parent CL 0.3 l/h/kg, Vd=1l/kg, t12= 3-4 h
 - urinary excretion glucuronide 60%, sulfate 35%, renal clearance GFR=120*.06=7.2 l/h=0.1 l/h/kg
+- maintenance dose rate mg/h = Css mg/l * CL l/h
 
 from experience:
 
 - CL variability 40% metabolism, 20 % renal
 - Vd variability 20%
 
+from clinical experience:
+
+child dose often per bodysurface aerea A = 0.09 wt^0.7
+
+- dose(child) = dose(adult) *(WTchild/70kg)^.75
+- higher dose per kg, adults 10mg/kg and children 15 mg/kg
+
+```{r meanCL3kg}
+MW<-150   # molecular weight of APAP
+CL<-0.3 *70; DR<-10 *70/8 ; Css<-DR/CL; Css/MW
+Css
+SA<-function(x) 0.09*x^.7
+cl<-.3*70/SA(70)*SA(3)/3 # l/h/kg at around 3 kg
+Css*cl*3
+
+cl*3;DR<-15 *3/8 ; Css<-DR/CL; Css/MW
+
+```
+
 
 
 ## objectives
 
-- simulate pk model with prior parameter 
+- simulate pk model with prior parameter from 70kg adults
+- repeat simulation CL~weight^.75 for 2.8 kg neonates
 
 
 ## number of patients, simulated weight distribution
 
 ```{r dosewt}
 source("lib/helpers.R")
+library(lattice)
 nid <- 15
-MW<-150
-weight_gmean <- 70
-weight_gmean <- 2.8
+pop<-"adults";
+weight_gmean <- 70; nDose<-8 ; tau<-8;dose <- 10  # mg/kg
+pop<-"neonates";weight_gmean <- 2.8; nDose<-7; tau<-8;dose <- 15 # mg/kg
 weight_sd95 <- 0.2
-IVdose <- 15*1000/MW  # umol/kg
+IVdose <- dose *1000/MW
 tinf<-0.5 #h
 rate<-IVdose/tinf
-tau<-24
-time <- exp(seq(log(0.1),log(48),length=16))
-time <- exp(seq(log(0.1),log(tau),length=6))
-#time <- exp(c(seq(log(0.1),log(24),length=11), seq(log(24.5), log(48), length=6)))
-
-
-## variance components
-## random effects on CL and V
-
 
 ```
 
@@ -73,20 +86,29 @@ systemODE_1cmt_m2 <- function(lMRT10, lMRT20, lMRT30, lfm1, lfm2) {
 
 
 ```{r poppk}
-CL<-c(0.3,0.1,0.1) # l/h/kg
-V<-c(1,.9,1.2) # l/kg
-MRT<-V/CL
-MRT*log(2)
+cl<-function(CL70,wt) CL70* (wt/70)^0.75
+
+CL<-c(0.3,0.1,0.1)*weight_gmean
+V<-c(1,.9,1.2)*weight_gmean
 fm1 <- 0.6 ## note: this is FIXED right now
 fm2 <- 0.3 ## note: this is FIXED right now
+if(pop=="neonates") {
+  CL<-CL*1
+  V<-V*1.5
+  fm1<-0.3
+  fm2<-0.3
+}
+MRT<-V/CL
+MRT*log(2)
+
 omega <- c(CL=0.4, V=0.2)
 omMRT<-sqrt(omega[2]^2+omega[1]^2)
 sigma <- c(0.1, 0.1, 0.1)
-
+fm<-c(1,fm1,fm2)
 truth <- c(MRT, V)
 Ttruth <- log(truth)
 
-
+weight_gmean*IVdose/tinf/CL[1]*(1-exp(-tinf/MRT[1]))
 ```
 
 
@@ -102,10 +124,10 @@ ppk<-data.frame(id=1:nid
            ,weight=rlnorm(nid, log(weight_gmean), weight_sd95/1.96)
            )
            
-ppk<-cbind(ppk,stdnorm)   
+ppk<-cbind(ppk,stdnorm) 
 ppk<-transform(ppk
-          ,dose=IVdose
-          ,rate=IVdose/tinf
+          ,dose=IVdose*weight
+          ,rate=IVdose/tinf*weight
           ,lMRT10=Ttruth[1]+V1*omMRT+ 0.25 * log(weight/weight_gmean)
           ,lMRT20=Ttruth[2]+V2*omMRT+ 0.25 * log(weight/weight_gmean)
           ,lMRT30=Ttruth[3]+V3*omMRT+ 0.25 * log(weight/weight_gmean)
@@ -115,6 +137,21 @@ ppk<-transform(ppk
           ,lfm1=log(fm1)
           ,lfm2=log(fm2)
           )
+
+ppk2<-transform(ppk
+          ,dose=IVdose*weight
+          ,rate=IVdose/tinf*weight
+          ,lMRT10=Ttruth[1]+V1*omMRT+ 0.25 * log(weight/weight_gmean)
+          ,lMRT20=Ttruth[2]+V2*omMRT+ 0.25 * log(weight/weight_gmean)
+          ,lMRT30=Ttruth[3]+V3*omMRT+ 0.25 * log(weight/weight_gmean)
+          ,lV1=Ttruth[4]+V4*omega["V"]+ log(weight/weight_gmean)
+          ,lV2=Ttruth[5]+V5*omega["V"]+ log(weight/weight_gmean)
+          ,lV3=Ttruth[6]+V6*omega["V"]+ log(weight/weight_gmean)
+          ,lfm1=log(fm1)
+          ,lfm2=log(fm2)
+          )
+
+
 pars <- transform(ppk
                  ,lk12=log(fm1) - lMRT10
                  ,lk13=log(fm2) - lMRT10
@@ -131,19 +168,17 @@ library(foreach)
 library(reshape2)
 library(plyr)
 J<-nid
-nDose<-5
-tau<-12
+
 inftime<-exp(seq(log(0.1),log(tinf),length=4))
 washtime<-  exp(seq(log(0.6),log(tau),length=6))
 time<-c(inftime,washtime,tau+inftime)
+j<-1
 sim <- foreach(j=1:J, .combine=rbind) %do% {
     sol <- matrixODE(do.call(systemODE_1cmt_m2, pars[j,c("lMRT10", "lMRT20", "lMRT30", "lfm1", "lfm2")]))
     sol1 <- cmt_select(sol, 1)
     sol2 <- cmt_select(sol, 2)
     sol3 <- cmt_select(sol, 3)
     IVdose_j <- IVdose ##rlnorm(1, log(IVdose), log(1.1))
-    ##x0 <- c(IVdose_j,0,0)
-    ##b <- c(0, 0, 0)
     
     b <- c(rate, 0, 0)
     b2 <- c(0, 0, 0)
@@ -162,9 +197,10 @@ sim <- foreach(j=1:J, .combine=rbind) %do% {
     dd2 <- as.data.frame(t(sol(time2,x0, b2)))
     dd2<-transform(dd2,time=washtime,evid=0)
     dd2
-    
+    ddd<-rbind(dd1,dd2)
 #nDose<-2
-      ddd <- foreach(nDose=1:nDose, .combine=rbind) %do% {
+if(nDose>1){
+      dddn <- foreach(nDose=2:nDose, .combine=rbind) %do% {
       #print(nDose)
       ## infusion
       x0<-as.vector(sol(tau-tinf, x0, b2))
@@ -181,12 +217,14 @@ sim <- foreach(j=1:J, .combine=rbind) %do% {
     rbind(dd3,dd4)
   }
   
-  dd <- transform(rbind(dd1,dd2,ddd), V1=V1/exp(pars$lV1[j]), V2=V2/exp(pars$lV2[j]), V3=V3/exp(pars$lV3[j]))
+  ddd<-rbind(dd1,dd2,dddn)
+  }
+
+  dd <- transform(ddd, V1=V1/exp(pars$lV1[j]), V2=V2/exp(pars$lV2[j]), V3=V3/exp(pars$lV3[j]))
 subset(dd,evid==1)
     M <- melt(dd, id.vars=c("time","evid"))
 
 
-M
     obs <- data.frame(id=j, sdv=M$value, time=M$time, amt=0, rate=0, evid=M$evid, mdv=0, cmt=as.numeric(M$variable))
 obs[obs$evid==1,]<-transform(obs[obs$evid==1,],amt=IVdose,rate=IVdose/tinf)
     obs$dv <- obs$sdv
@@ -209,39 +247,42 @@ sim <- subset(sim, !(time==0 & evid==0))
 sim<-transform(sim,met=factor(as.character(cmt),levels=c("1","2","3"),labels=c("AP","GL","SU")))
 #levels(sim$met)<-list("1"="APAP", "2"="GLUC", "3"="SULF")
 levels(sim$met)
-head(sim,20)
+#head(sim,20)
 subset(sim,id==1&cmt==2)
 
 ```
 
+css=`r IVdose/tau/CL `
 
-## figure PK
+
+## PK in `r pop` dose=`r dose ` mg/kg
 
 
 ```{r pk,echo=FALSE,message=FALSE,warning=FALSE}
 library(nlme)
-gd<-groupedData(dv~time|id,subset(sim,sdv>1E-5),outer=~met)
+gd<-groupedData(dv~time|id,subset(sim,sdv>1E-5),outer=~met,labels=list(x="Time, ",y="conc,"),units=list(x="h",y="umol/l"))
+gd$day<-cut(gd$time,seq(0,(nDose+1)*tau,24),labels=F)
 plot(gd,outer=T,key=F,scale=list(y="free"))
 
 ```
 
-## figure log
+## PK log in `r pop` dose=`r dose ` mg/kg
 
 
 ```{r figlog,echo=FALSE}
 plot(gd,outer=T,key=F,scale=list(y=xyLogscale()),aspect="fill")
 ```
 
-## figure log day1
+## P log first day in `r pop` dose=`r dose ` mg/kg
 
 ```{r day1,echo=FALSE,warning=FALSE}
-plot(subset(gd,time<24.1),outer=T,key=F,scale=list(y=xyLogscale()),aspect="fill")
+plot(subset(gd,day==1),outer=T,key=F,scale=list(y=xyLogscale()),aspect="fill")
 ```
 
-## figure log last day
+## PK log last `r max(gd$day)` day in `r pop` dose=`r dose ` mg/kg
 
 ```{r daylast,echo=FALSE,warning=FALSE}
-plot(subset(gd,time>(nDose-1)*tau),outer=T,key=F,scale=list(y=xyLogscale()),aspect="fill")
+plot(subset(gd,day==max(day)),outer=T,key=F,scale=list(y=xyLogscale()),aspect="fill")
 ```
 
 
