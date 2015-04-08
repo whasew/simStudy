@@ -1,19 +1,12 @@
-Design and Simulation of an gene expression experiment
+PK Simulation of adults and children dosing stratedies
 ======================================================
 
 # Questions
-- is gene expression different in differentiated cells?
-- monocytes differentiates to macrophages
-- drug concentrations induce gene expression?
+
+- adults PK used as a priori knowledge to study children PK 
+- prepare a nonmem data set and evaluate the sim data using rstan
+- similar drug concentrations?
 
 # Design
 
-## 5 cases
- case | differentiated  | drug concentration  
- ------------- | ------------- | -------------  
- 1 | - | 0  
- 2  | + | 0  
- 3 | + | 2.5  
- 4 | + | 5  
- 5 | + | 7  
-
+- 15 neonates 7 doses of 15 mg/kg every 8 h
