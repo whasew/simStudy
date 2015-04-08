@@ -261,7 +261,7 @@ css=`r IVdose/tau/CL `
 ```{r pk,echo=FALSE,message=FALSE,warning=FALSE}
 library(nlme)
 gd<-groupedData(dv~time|id,subset(sim,sdv>1E-5),outer=~met,labels=list(x="Time, ",y="conc,"),units=list(x="h",y="umol/l"))
-gd$day<-cut(gd$time,seq(0,(nDose+1)*tau,24),labels=F)
+gd$day<-cut(gd$time,seq(0,(nDose+1)*tau+24,24),labels=F)
 plot(gd,outer=T,key=F,scale=list(y="free"))
 
 ```
