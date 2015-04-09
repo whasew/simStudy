@@ -1,4 +1,4 @@
-PK Simulation of adults and children dosing stratedies
+PK Simulation of adults and children dosing strategies
 ======================================================
 
 # Questions
@@ -10,3 +10,6 @@ PK Simulation of adults and children dosing stratedies
 # Design
 
 - 15 neonates 7 doses of 15 mg/kg every 8 h
+
+
+# cache sim data.frame for use with stan evaluation

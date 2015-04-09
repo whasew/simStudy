@@ -5,16 +5,31 @@ date: "06.04.2015"
 output: ioslides_presentation
 ---
 
+
+## objectives
+
+- simulate pk model in children with prior parameter from 70kg adults (Goodman & Gilman)
+- calculate CL per bodysurface from CL per kg
+- calculate adults dose per bodysurface - calculate neonates dose and rescale to per kg
+- repeat simulation CL~weight^.75 for 2.8 kg neonates
+
+Livingston-Lee-Formel (wiki):
+
+- bei Körpermasse ≥ 10 kg: S = 0{,}1173 * $M^{0.6466}$
+- bei Körpermasse < 10 kg: S = 0{,}1037 * $M^{0.6724}$
+
+
 ## use of prior knowledge of APAP PK
 
 in 70 kg adults:
 - parent CL 0.3 l/h/kg, Vd=1l/kg, t12= 3-4 h
 - urinary excretion glucuronide 60%, sulfate 35%, renal clearance GFR=120*.06=7.2 l/h=0.1 l/h/kg
 - maintenance dose rate mg/h = Css mg/l * CL l/h
+- glucuronide of morphine t12 ~ 2 * parent t12
 
 from experience:
 
-- CL variability 40% metabolism, 20 % renal
+- CL variability 40% metabolism, 20 % renal excretion
 - Vd variability 20%
 
 from clinical experience:
@@ -26,22 +41,16 @@ child dose often per bodysurface aerea A = 0.09 wt^0.7
 
 ```{r meanCL3kg}
 MW<-150   # molecular weight of APAP
-CL<-0.3 *70; DR<-10 *70/8 ; Css<-DR/CL; Css/MW
+CL<-0.3 *70; tau<-8; DR<-10 *70/tau ; Css<-DR/CL; #Css/MW
 Css
+10/tau/.3
 SA<-function(x) 0.09*x^.7
 cl<-.3*70/SA(70)*SA(3)/3 # l/h/kg at around 3 kg
-Css*cl*3
-
-cl*3;DR<-15 *3/8 ; Css<-DR/CL; Css/MW
+10/tau/cl
+Css*cl*tau
 
 ```
 
-
-
-## objectives
-
-- simulate pk model with prior parameter from 70kg adults
-- repeat simulation CL~weight^.75 for 2.8 kg neonates
 
 
 ## number of patients, simulated weight distribution
@@ -54,11 +63,39 @@ pop<-"adults";
 weight_gmean <- 70; nDose<-8 ; tau<-8;dose <- 10  # mg/kg
 pop<-"neonates";weight_gmean <- 2.8; nDose<-7; tau<-8;dose <- 15 # mg/kg
 weight_sd95 <- 0.2
-IVdose <- dose *1000/MW
+cl<-function(CL70,wt) CL70* (wt/70)^0.7
+IVdose <- dose *1000/MW # umol/kg
 tinf<-0.5 #h
-rate<-IVdose/tinf
-
+rate<-IVdose/tinf # umol/h/kg
 ```
+
+## population parameter as geometric means
+
+```{r poppk}
+CL<-c(0.3,0.1,0.1) # mg/kg 70kg adults
+V<-c(1,.9,1.2)  # l/kg adults and neonates
+fm1 <- 0.6 ## note: this is FIXED right now
+fm2 <- 0.3 ## note: this is FIXED right now
+if(pop=="neonates") {
+  CL<-cl(CL*70,weight_gmean)/weight_gmean # l/kg for weight_gmean neonates
+  V<-V*2
+  fm1<-0.3
+  fm2<-0.6
+}
+MRT<-V/CL
+MRT*log(2)
+
+omega <- c(CLp=0.4, CLm=0.2,V=0.2)
+omMRT<-c(p=sqrt(omega["V"]^2+omega["CLp"]^2),m=sqrt(omega["V"]^2+omega["CLm"]^2))
+
+sigma <- c(0.1, 0.1, 0.1)
+fm<-c(1,fm1,fm2)
+truth <- c(MRT, V)
+Ttruth <- log(truth)
+
+IVdose/tinf/CL[1]*(1-exp(-tinf/MRT[1])) # Cmax P
+```
+
 
 ## utility functions to generate system matrices
 
@@ -79,71 +116,24 @@ systemODE_1cmt_m2 <- function(lMRT10, lMRT20, lMRT30, lfm1, lfm2) {
 ```
 
 
-
-
-## population medians, means for the log-normals (or the geometric mean)
-
-
-
-```{r poppk}
-cl<-function(CL70,wt) CL70* (wt/70)^0.75
-
-CL<-c(0.3,0.1,0.1)*weight_gmean
-V<-c(1,.9,1.2)*weight_gmean
-fm1 <- 0.6 ## note: this is FIXED right now
-fm2 <- 0.3 ## note: this is FIXED right now
-if(pop=="neonates") {
-  CL<-CL*1
-  V<-V*1.5
-  fm1<-0.3
-  fm2<-0.3
-}
-MRT<-V/CL
-MRT*log(2)
-
-omega <- c(CL=0.4, V=0.2)
-omMRT<-sqrt(omega[2]^2+omega[1]^2)
-sigma <- c(0.1, 0.1, 0.1)
-fm<-c(1,fm1,fm2)
-truth <- c(MRT, V)
-Ttruth <- log(truth)
-
-weight_gmean*IVdose/tinf/CL[1]*(1-exp(-tinf/MRT[1]))
-```
-
-
-
-# parent pk parameter distribution
+## parent pk parameter distribution
 
 ```{r pdf}
 library(mvtnorm)
 set.seed(27245)
 stdnorm<-as.data.frame(rmvnorm(nid,rep(0,length(Ttruth)),sigma=diag(length(Ttruth))))
-names(stdnorm)
+#names(stdnorm)
 ppk<-data.frame(id=1:nid
            ,weight=rlnorm(nid, log(weight_gmean), weight_sd95/1.96)
            )
            
 ppk<-cbind(ppk,stdnorm) 
 ppk<-transform(ppk
-          ,dose=IVdose*weight
-          ,rate=IVdose/tinf*weight
-          ,lMRT10=Ttruth[1]+V1*omMRT+ 0.25 * log(weight/weight_gmean)
-          ,lMRT20=Ttruth[2]+V2*omMRT+ 0.25 * log(weight/weight_gmean)
-          ,lMRT30=Ttruth[3]+V3*omMRT+ 0.25 * log(weight/weight_gmean)
-          ,lV1=Ttruth[4]+V4*omega["V"]+ log(weight/weight_gmean)
-          ,lV2=Ttruth[5]+V5*omega["V"]+ log(weight/weight_gmean)
-          ,lV3=Ttruth[6]+V6*omega["V"]+ log(weight/weight_gmean)
-          ,lfm1=log(fm1)
-          ,lfm2=log(fm2)
-          )
-
-ppk2<-transform(ppk
-          ,dose=IVdose*weight
-          ,rate=IVdose/tinf*weight
-          ,lMRT10=Ttruth[1]+V1*omMRT+ 0.25 * log(weight/weight_gmean)
-          ,lMRT20=Ttruth[2]+V2*omMRT+ 0.25 * log(weight/weight_gmean)
-          ,lMRT30=Ttruth[3]+V3*omMRT+ 0.25 * log(weight/weight_gmean)
+          ,dose=IVdose
+          ,rate=IVdose/tinf
+          ,lMRT10=Ttruth[1]+V1*omMRT["p.V"]+ 0.25 * log(weight/weight_gmean)
+          ,lMRT20=Ttruth[2]+V2*omMRT["m.V"]+ 0.25 * log(weight/weight_gmean)
+          ,lMRT30=Ttruth[3]+V3*omMRT["m.V"]+ 0.25 * log(weight/weight_gmean)
           ,lV1=Ttruth[4]+V4*omega["V"]+ log(weight/weight_gmean)
           ,lV2=Ttruth[5]+V5*omega["V"]+ log(weight/weight_gmean)
           ,lV3=Ttruth[6]+V6*omega["V"]+ log(weight/weight_gmean)
@@ -160,27 +150,25 @@ pars <- transform(ppk
 ```
 
 
-# PK after 5 APAP infusions
+## PK after `r nDose` APAP infusions in `r pop`
 
 ```{r sim}
 source("src/matrixODE.R")
 library(foreach)
 library(reshape2)
 library(plyr)
-J<-nid
-
 inftime<-exp(seq(log(0.1),log(tinf),length=4))
 washtime<-  exp(seq(log(0.6),log(tau),length=6))
 time<-c(inftime,washtime,tau+inftime)
-j<-1
-sim <- foreach(j=1:J, .combine=rbind) %do% {
+#j<-1
+sim <- foreach(j=1:nid, .combine=rbind) %do% {
     sol <- matrixODE(do.call(systemODE_1cmt_m2, pars[j,c("lMRT10", "lMRT20", "lMRT30", "lfm1", "lfm2")]))
     sol1 <- cmt_select(sol, 1)
     sol2 <- cmt_select(sol, 2)
     sol3 <- cmt_select(sol, 3)
-    IVdose_j <- IVdose ##rlnorm(1, log(IVdose), log(1.1))
-    
-    b <- c(rate, 0, 0)
+    IVdose_j <- pars$dose[j]
+    rate_j<-pars$rate[j]
+    b <- c(rate_j, 0, 0)
     b2 <- c(0, 0, 0)
     time1 <- inftime
     time2 <- washtime - tinf
@@ -188,14 +176,14 @@ sim <- foreach(j=1:J, .combine=rbind) %do% {
     tdose<-0
     x0 <- c(0,0,0)
     ddo<-as.data.frame(t(x0))
-    ddo<-transform(ddo,time=0,evid=1)
+    ddo<-transform(ddo,time=0,evid=1,mdv=1)
     dd1 <- as.data.frame(t(sol(time1, x0, b)))
-    dd1<-transform(dd1,time=time1,evid=0)
+    dd1<-transform(dd1,time=time1,evid=0,mdv=0)
     dd1<-rbind(ddo,dd1)
     ##washout
     x0<-as.vector(sol(tinf, x0, b))
     dd2 <- as.data.frame(t(sol(time2,x0, b2)))
-    dd2<-transform(dd2,time=washtime,evid=0)
+    dd2<-transform(dd2,time=washtime,evid=0,mdv=0)
     dd2
     ddd<-rbind(dd1,dd2)
 #nDose<-2
@@ -205,15 +193,14 @@ if(nDose>1){
       ## infusion
       x0<-as.vector(sol(tau-tinf, x0, b2))
       ddo<-as.data.frame(t(x0))
-    ddo<-transform(ddo,time=(nDose-1)*tau,evid=1)
+    ddo<-transform(ddo,time=(nDose-1)*tau,evid=1,mdv=1)
     dd3 <- as.data.frame(t(sol(time1,x0, b)))
-     dd3<-transform(dd3,time=(nDose-1)*tau+time1,evid=0)
+     dd3<-transform(dd3,time=(nDose-1)*tau+time1,evid=0,mdv=0)
     dd3<-rbind(ddo,dd3)
-    #dd3
     ##washout
   x0<-   as.vector(sol(tinf, x0, b))
   dd4 <- as.data.frame(t(sol(time2,x0, b2)))
-   dd4<-transform(dd4,time=(nDose-1)*tau+washtime,evid=0)
+   dd4<-transform(dd4,time=(nDose-1)*tau+washtime,evid=0,mdv=0)
     rbind(dd3,dd4)
   }
   
@@ -222,16 +209,15 @@ if(nDose>1){
 
   dd <- transform(ddd, V1=V1/exp(pars$lV1[j]), V2=V2/exp(pars$lV2[j]), V3=V3/exp(pars$lV3[j]))
 subset(dd,evid==1)
-    M <- melt(dd, id.vars=c("time","evid"))
+    M <- melt(dd, id.vars=c("time","evid","mdv"))
 
-
-    obs <- data.frame(id=j, sdv=M$value, time=M$time, amt=0, rate=0, evid=M$evid, mdv=0, cmt=as.numeric(M$variable))
-obs[obs$evid==1,]<-transform(obs[obs$evid==1,],amt=IVdose,rate=IVdose/tinf)
+    obs <- data.frame(id=j, sdv=M$value, time=M$time, amt=0, rate=0, evid=M$evid, mdv=M$mdv, cmt=as.numeric(M$variable))
+obs[obs$evid==1,]<-transform(obs[obs$evid==1,],amt=IVdose_j,rate=rate_j)
     obs$dv <- obs$sdv
     obs$dv[obs$cmt==1] <- obs$dv[obs$cmt==1] * rlnorm(nrow(dd), 0, sigma[1])
     obs$dv[obs$cmt==2] <- obs$dv[obs$cmt==2] * rlnorm(nrow(dd), 0, sigma[2])
     obs$dv[obs$cmt==3] <- obs$dv[obs$cmt==3] * rlnorm(nrow(dd), 0, sigma[3])
-subset(obs,evid==1&cmt==1)
+#subset(obs,evid==1&cmt==1)
 obs<-subset(obs,!(evid==1&cmt%in%c(2,3)))
 ##    amt <- data.frame(id=j, sdv=0, time=0, amt=IVdose_j, rate=b[1], evid=1, mdv=1, cmt=1, dv=0 )
 #    res <- arrange(rbind(amt, obs), time, cmt)
@@ -241,15 +227,12 @@ obs<-subset(obs,!(evid==1&cmt%in%c(2,3)))
 
 ## discard dv when system is still equal to 0 as we calculate in log-space
 sim <- subset(sim, !(time==0 & evid==0))
-
-#sim<-transform(sim,met=factor(cmt,levels=1:3,labels=c("APAP","GLUC","SULF")))
-
-sim<-transform(sim,met=factor(as.character(cmt),levels=c("1","2","3"),labels=c("AP","GL","SU")))
-#levels(sim$met)<-list("1"="APAP", "2"="GLUC", "3"="SULF")
+class(sim$cmt)
+sim<-transform(sim,met=factor(cmt,levels=1:3,labels=c("APAP","GLUC","SULF")))
 levels(sim$met)
 #head(sim,20)
 subset(sim,id==1&cmt==2)
-
+#cache("sim")
 ```
 
 css=`r IVdose/tau/CL `
@@ -260,6 +243,8 @@ css=`r IVdose/tau/CL `
 
 ```{r pk,echo=FALSE,message=FALSE,warning=FALSE}
 library(nlme)
+
+sim<-transform(sim,id=droplevels(factor(id)))
 gd<-groupedData(dv~time|id,subset(sim,sdv>1E-5),outer=~met,labels=list(x="Time, ",y="conc,"),units=list(x="h",y="umol/l"))
 gd$day<-cut(gd$time,seq(0,(nDose+1)*tau+24,24),labels=F)
 plot(gd,outer=T,key=F,scale=list(y="free"))
